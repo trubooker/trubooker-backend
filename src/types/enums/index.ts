@@ -286,6 +286,7 @@ export const PREFERRED_TIME_RANGES: string[] = Object.values(
   PREFERRED_TIME_SLOT_TO_RANGE,
 );
 
+export const niyu = {};
 /** Reverse lookup: a range string back to its slot (for scheduling/metadata). */
 export const PREFERRED_TIME_RANGE_TO_SLOT: Record<string, PreferredTime> = {
   [PREFERRED_TIME_SLOT_TO_RANGE[PreferredTime.MORNING]]: PreferredTime.MORNING,
