@@ -932,20 +932,37 @@ async searchTrips(query: {
  
   const pagedDto = new PagedDto();
   pagedDto.data = data.map((t) => {
-    // trip.price (and tripSpecification[0].price) is the TOTAL fare the
-    // driver set for the whole trip — not per seat. Divide by totalSeats to
-    // get the per-seat fare shown to passengers.
     const spec = this.parseTripSpecification(t.tripSpecification);
     const totalPrice = Number(spec.price ?? t.price ?? 0);
     const pricePerSeat =
       t.totalSeats > 0 ? Math.round((totalPrice / t.totalSeats) * 100) / 100 : totalPrice;
- 
+
+    const tripSpecification = Array.isArray(t.tripSpecification)
+      ? t.tripSpecification.map((s) => ({ ...s, price: pricePerSeat }))
+      : t.tripSpecification;
+
     return {
       ...t,
+      tripSpecification,
       price: pricePerSeat,
       availableSeats: t.totalSeats - (t.bookedSeats ?? 0),
     };
   });
+  // pagedDto.data = data.map((t) => {
+  //   // trip.price (and tripSpecification[0].price) is the TOTAL fare the
+  //   // driver set for the whole trip — not per seat. Divide by totalSeats to
+  //   // get the per-seat fare shown to passengers.
+  //   const spec = this.parseTripSpecification(t.tripSpecification);
+  //   const totalPrice = Number(spec.price ?? t.price ?? 0);
+  //   const pricePerSeat =
+  //     t.totalSeats > 0 ? Math.round((totalPrice / t.totalSeats) * 100) / 100 : totalPrice;
+ 
+  //   return {
+  //     ...t,
+  //     price: pricePerSeat,
+  //     availableSeats: t.totalSeats - (t.bookedSeats ?? 0),
+  //   };
+  // });
  
   pagedDto.meta = {
     page,
