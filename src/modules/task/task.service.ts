@@ -48,36 +48,36 @@ export class TasksService {
   // softRemove sets deletedAt (consistent with BaseEntity's
   // soft-delete setup) so nothing is lost permanently.
   // ────────────────────────────────────────────────────────────────
-  @Cron(CronExpression.EVERY_HOUR)
-  async deleteStaleUnbookedTrips() {
-    try {
-      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // @Cron(CronExpression.EVERY_HOUR)
+  // async deleteStaleUnbookedTrips() {
+  //   try {
+  //     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-      const staleTrips = await this.tripRepo
-        .createQueryBuilder('trip')
-        .where('trip.status = :status', { status: TripStatus.PENDING })
-        .andWhere('trip.createdAt < :cutoff', { cutoff })
-        .andWhere((qb) => {
-          const sub = qb
-            .subQuery()
-            .select('1')
-            .from(Booking, 'booking')
-            .where('booking.tripId = trip.id')
-            .getQuery();
-          return `NOT EXISTS ${sub}`;
-        })
-        .getMany();
+  //     const staleTrips = await this.tripRepo
+  //       .createQueryBuilder('trip')
+  //       .where('trip.status = :status', { status: TripStatus.PENDING })
+  //       .andWhere('trip.createdAt < :cutoff', { cutoff })
+  //       .andWhere((qb) => {
+  //         const sub = qb
+  //           .subQuery()
+  //           .select('1')
+  //           .from(Booking, 'booking')
+  //           .where('booking.tripId = trip.id')
+  //           .getQuery();
+  //         return `NOT EXISTS ${sub}`;
+  //       })
+  //       .getMany();
 
-      if (staleTrips.length === 0) return;
+  //     if (staleTrips.length === 0) return;
 
-      await this.tripRepo.softRemove(staleTrips);
-      this.logger.log(
-        `Soft-deleted ${staleTrips.length} unbooked trip(s) older than 24h: ${staleTrips
-          .map((t) => t.reference)
-          .join(', ')}`,
-      );
-    } catch (err) {
-      this.logger.error(`Stale trip cleanup failed: ${err.message}`, err.stack);
-    }
-  }
+  //     await this.tripRepo.softRemove(staleTrips);
+  //     this.logger.log(
+  //       `Soft-deleted ${staleTrips.length} unbooked trip(s) older than 24h: ${staleTrips
+  //         .map((t) => t.reference)
+  //         .join(', ')}`,
+  //     );
+  //   } catch (err) {
+  //     this.logger.error(`Stale trip cleanup failed: ${err.message}`, err.stack);
+  //   }
+  // }
 }
