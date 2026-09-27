@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, QueryFailedError, Repository } from 'typeorm';
 import { UserRepository } from '@adapters/repositories/user.repository';
 import { PassengerRepository } from '@adapters/repositories/passenger.repository';
 import { DriverRepository } from '@adapters/repositories/driver.repository';
@@ -543,6 +543,36 @@ async resendPhoneOtp(
   );
 }
 
+// async verifyPhoneOtp(phone: string, otp: string, entityManager?: EntityManager): Promise<User> {
+//   const user = await this.userRepository.findByPhoneOrPendingPhone(phone);
+//   if (!user) throw new BadRequestException('User not found');
+//   if (isOtpExpired(user.phoneOtpExpiresAt)) throw new BadRequestException('OTP has expired');
+
+//   if ((user.phoneOtpAttempts ?? 0) >= AuthService.MAX_OTP_ATTEMPTS) {
+//     await this.userRepository.updateUser(user.id, { phoneOtpCode: null, phoneOtpExpiresAt: null }, entityManager);
+//     throw new BadRequestException('Too many attempts. Please request a new code.');
+//   }
+
+//   const valid = user.phoneOtpCode ? await this.hashingUtil.compare(otp, user.phoneOtpCode) : false;
+//   if (!valid) {
+//     await this.userRepository.updateUser(user.id, { phoneOtpAttempts: (user.phoneOtpAttempts ?? 0) + 1 }, entityManager);
+//     throw new BadRequestException('Invalid OTP');
+//   }
+
+//   const updates: Partial<User> = {
+//     isPhoneVerified: true,
+//     status: UserStatus.ACTIVE,
+//     phoneOtpCode: null,
+//     phoneOtpExpiresAt: null,
+//   };
+//   if (user.pendingPhone) {
+//     updates.phone = user.pendingPhone;
+//     updates.pendingPhone = null;
+//   }
+
+//   return this.userRepository.updateUser(user.id, updates, entityManager);
+// }
+
 async verifyPhoneOtp(phone: string, otp: string, entityManager?: EntityManager): Promise<User> {
   const user = await this.userRepository.findByPhoneOrPendingPhone(phone);
   if (!user) throw new BadRequestException('User not found');
@@ -570,7 +600,14 @@ async verifyPhoneOtp(phone: string, otp: string, entityManager?: EntityManager):
     updates.pendingPhone = null;
   }
 
-  return this.userRepository.updateUser(user.id, updates, entityManager);
+  try {
+    return await this.userRepository.updateUser(user.id, updates, entityManager);
+  } catch (err) {
+    if (err instanceof QueryFailedError && (err as any).driverError?.code === '23505') {
+      throw new ConflictException('Phone number already exists');
+    }
+    throw err;
+  }
 }
 
 async forgotPassword(email: string, entityManager?: EntityManager): Promise<void> {
