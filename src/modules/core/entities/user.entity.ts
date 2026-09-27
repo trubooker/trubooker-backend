@@ -72,8 +72,11 @@ export class User extends BaseEntity {
     // @DeleteDateColumn()
     // dob?: Date;
 
-    @Column({ type: 'date', nullable: true })
-dob: string;
+  @Column({ type: 'date', nullable: true })
+  dob: string;
+
+@Column({ type: 'varchar', nullable: true })
+pendingPhone: string;
 
   @Exclude({ toPlainOnly: true })
   @Column({ type: 'varchar', nullable: true })

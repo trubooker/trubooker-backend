@@ -30,6 +30,7 @@ import { NotificationService } from '@modules/notification/services/notification
 import { UpdatePasswordDto } from '../dtos/updatepassword.dto';
 import { Agent } from '@modules/core/entities/agent.entity';
 import { SmsFactory } from '@adapters/sms/sms.factory';
+import { ChangePhoneDto } from '../dtos/change-phone.dto';
 
 @Injectable()
 export class AuthService {
@@ -362,41 +363,41 @@ async loginAgent(dto: LoginDto): Promise<{ user: User; accessToken: string; refr
     return { user, ...tokens };
   }
 
-  async verifyPhoneOtp(phone: string, otp:string, entityManager?: EntityManager): Promise<User>{
-     const user = await this.userRepository.findByPhone(phone);
-     if (!user) throw new BadRequestException('User not found');
-    //  if (user.phoneOtpCode !== otp) throw new BadRequestException('Invalid OTP');
-     if (isOtpExpired(user.phoneOtpExpiresAt)) throw new BadRequestException('OTP has expired');
+  // async verifyPhoneOtp(phone: string, otp:string, entityManager?: EntityManager): Promise<User>{
+  //    const user = await this.userRepository.findByPhone(phone);
+  //    if (!user) throw new BadRequestException('User not found');
+  //   //  if (user.phoneOtpCode !== otp) throw new BadRequestException('Invalid OTP');
+  //    if (isOtpExpired(user.phoneOtpExpiresAt)) throw new BadRequestException('OTP has expired');
 
-    if ((user.phoneOtpAttempts ?? 0) >= AuthService.MAX_OTP_ATTEMPTS) {
-    // Invalidate so a fresh OTP must be requested
-    await this.userRepository.updateUser(
-      user.id,
-      { phoneOtpCode: null, phoneOtpExpiresAt: null },
-      entityManager,
-    );
-    throw new BadRequestException('Too many attempts. Please request a new code.');
-  }
+  //   if ((user.phoneOtpAttempts ?? 0) >= AuthService.MAX_OTP_ATTEMPTS) {
+  //   // Invalidate so a fresh OTP must be requested
+  //   await this.userRepository.updateUser(
+  //     user.id,
+  //     { phoneOtpCode: null, phoneOtpExpiresAt: null },
+  //     entityManager,
+  //   );
+  //   throw new BadRequestException('Too many attempts. Please request a new code.');
+  // }
 
-    const valid = user.phoneOtpCode
-    ? await this.hashingUtil.compare(otp, user.phoneOtpCode)
-    : false;
-      if (!valid) {
-    await this.userRepository.updateUser(
-      user.id,
-      { phoneOtpAttempts: (user.phoneOtpAttempts ?? 0) + 1 },
-      entityManager,
-    );
-    throw new BadRequestException('Invalid OTP');
-  }
+  //   const valid = user.phoneOtpCode
+  //   ? await this.hashingUtil.compare(otp, user.phoneOtpCode)
+  //   : false;
+  //     if (!valid) {
+  //   await this.userRepository.updateUser(
+  //     user.id,
+  //     { phoneOtpAttempts: (user.phoneOtpAttempts ?? 0) + 1 },
+  //     entityManager,
+  //   );
+  //   throw new BadRequestException('Invalid OTP');
+  // }
 
-    return this.userRepository.updateUser(
-      user.id,
-      { isPhoneVerified: true, status: UserStatus.ACTIVE, phoneOtpCode: null, phoneOtpExpiresAt: null },
-      entityManager,
-    );
+  //   return this.userRepository.updateUser(
+  //     user.id,
+  //     { isPhoneVerified: true, status: UserStatus.ACTIVE, phoneOtpCode: null, phoneOtpExpiresAt: null },
+  //     entityManager,
+  //   );
   
-  }
+  // }
 
     async verifyAdminOtp(email: string, otp: string, entityManager?: EntityManager): Promise<Admin> {
       const user = await this.adminRepo.findByEmail(email);
@@ -429,34 +430,147 @@ async loginAgent(dto: LoginDto): Promise<{ user: User; accessToken: string; refr
     // TODO: send OTP via notification service
   }
 
-async resendPhoneOtp({ phone }: ResendPhoneOtpDto, entityManager?: EntityManager): Promise<void> {
-  const user = await this.userRepository.findByPhone(phone);
+// async resendPhoneOtp({ phone }: ResendPhoneOtpDto, entityManager?: EntityManager): Promise<void> {
+//   const user = await this.userRepository.findByPhone(phone);
+//   if (!user) throw new BadRequestException('User not found');
+//   if (user.isPhoneVerified) throw new BadRequestException('User phone already verified');
+
+//   const phoneOtp = this.randomnessUtil.generateOtp();
+//   const minutes = this.configService.get<number>('common.otp.durationMinutes');
+//   const phoneExpires = getOtpExpiry(minutes);
+
+//   const hashedPhoneOtp = await this.hashingUtil.hash(phoneOtp);
+
+//   // send the PLAINTEXT otp via SMS, store the HASH
+//   // await this.dojahAdapter.sendSms({
+//   //   destination: user.phone,
+//   //   message: `Your Tru Booker verification code is ${phoneOtp}. It expires in ${minutes} minutes.`,
+//   // });
+
+//   const sent = await this.smsFactory.sendSms({
+//   destination: user.phone,
+//   message: `Your Tru Booker verification code is ${phoneOtp}. It expires in ${minutes} minutes.`,
+// });
+// if (!sent) throw new BadRequestException('Could not send SMS. Please try again.');
+
+//   await this.userRepository.updateUser(
+//     user.id,
+//     { phoneOtpCode: hashedPhoneOtp, phoneOtpExpiresAt: phoneExpires, phoneOtpAttempts: 0 },
+//     entityManager,
+//   );
+// }
+
+async changePhone(userId: string, dto: ChangePhoneDto, entityManager?: EntityManager): Promise<void> {
+  const user = await this.userRepository.findById(userId);
   if (!user) throw new BadRequestException('User not found');
-  if (user.isPhoneVerified) throw new BadRequestException('User phone already verified');
+
+  if (user.phone === dto.phone) {
+    throw new BadRequestException('This is already your current phone number');
+  }
+
+  const taken = await this.userRepository.findByPhoneOrPendingPhone(dto.phone);
+  if (taken && taken.id !== userId) {
+    throw new ConflictException('Phone number already in use');
+  }
+
+  const otp = this.randomnessUtil.generateOtp();
+  const minutes = this.configService.get<number>('common.otp.durationMinutes');
+  const phoneExpires = getOtpExpiry(minutes);
+  const hashedOtp = await this.hashingUtil.hash(otp);
+
+  const sent = await this.smsFactory.sendSms({
+    destination: dto.phone,
+    message: `Your Tru Booker verification code is ${otp}. It expires in ${minutes} minutes.`,
+  });
+  if (!sent) throw new BadRequestException('Could not send SMS. Please try again.');
+
+  await this.userRepository.updateUser(
+    user.id,
+    {
+      pendingPhone: dto.phone,
+      phoneOtpCode: hashedOtp,
+      phoneOtpExpiresAt: phoneExpires,
+      phoneOtpAttempts: 0,
+    },
+    entityManager,
+  );
+}
+
+async resendPhoneOtp(
+  userId: string,
+  { phone }: ResendPhoneOtpDto,
+  entityManager?: EntityManager,
+): Promise<void> {
+  const user = await this.userRepository.findById(userId);
+  if (!user) throw new BadRequestException('User not found');
+
+  let destination = user.pendingPhone || user.phone;
+  let pendingPhoneUpdate: string | undefined;
+
+  if (phone && phone !== user.phone) {
+    // A different number was supplied — treat this as a phone CHANGE.
+    const taken = await this.userRepository.findByPhoneOrPendingPhone(phone);
+    if (taken && taken.id !== userId) {
+      throw new ConflictException('Phone number already in use');
+    }
+    destination = phone;
+    pendingPhoneUpdate = phone;
+  } else if (!user.pendingPhone && user.isPhoneVerified) {
+    // Plain resend for the number already on file.
+    throw new BadRequestException('User phone already verified');
+  }
 
   const phoneOtp = this.randomnessUtil.generateOtp();
   const minutes = this.configService.get<number>('common.otp.durationMinutes');
   const phoneExpires = getOtpExpiry(minutes);
-
   const hashedPhoneOtp = await this.hashingUtil.hash(phoneOtp);
 
-  // send the PLAINTEXT otp via SMS, store the HASH
-  // await this.dojahAdapter.sendSms({
-  //   destination: user.phone,
-  //   message: `Your Tru Booker verification code is ${phoneOtp}. It expires in ${minutes} minutes.`,
-  // });
-
   const sent = await this.smsFactory.sendSms({
-  destination: user.phone,
-  message: `Your Tru Booker verification code is ${phoneOtp}. It expires in ${minutes} minutes.`,
-});
-if (!sent) throw new BadRequestException('Could not send SMS. Please try again.');
+    destination,
+    message: `Your Tru Booker verification code is ${phoneOtp}. It expires in ${minutes} minutes.`,
+  });
+  if (!sent) throw new BadRequestException('Could not send SMS. Please try again.');
 
   await this.userRepository.updateUser(
     user.id,
-    { phoneOtpCode: hashedPhoneOtp, phoneOtpExpiresAt: phoneExpires, phoneOtpAttempts: 0 },
+    {
+      phoneOtpCode: hashedPhoneOtp,
+      phoneOtpExpiresAt: phoneExpires,
+      phoneOtpAttempts: 0,
+      ...(pendingPhoneUpdate ? { pendingPhone: pendingPhoneUpdate } : {}),
+    },
     entityManager,
   );
+}
+
+async verifyPhoneOtp(phone: string, otp: string, entityManager?: EntityManager): Promise<User> {
+  const user = await this.userRepository.findByPhoneOrPendingPhone(phone);
+  if (!user) throw new BadRequestException('User not found');
+  if (isOtpExpired(user.phoneOtpExpiresAt)) throw new BadRequestException('OTP has expired');
+
+  if ((user.phoneOtpAttempts ?? 0) >= AuthService.MAX_OTP_ATTEMPTS) {
+    await this.userRepository.updateUser(user.id, { phoneOtpCode: null, phoneOtpExpiresAt: null }, entityManager);
+    throw new BadRequestException('Too many attempts. Please request a new code.');
+  }
+
+  const valid = user.phoneOtpCode ? await this.hashingUtil.compare(otp, user.phoneOtpCode) : false;
+  if (!valid) {
+    await this.userRepository.updateUser(user.id, { phoneOtpAttempts: (user.phoneOtpAttempts ?? 0) + 1 }, entityManager);
+    throw new BadRequestException('Invalid OTP');
+  }
+
+  const updates: Partial<User> = {
+    isPhoneVerified: true,
+    status: UserStatus.ACTIVE,
+    phoneOtpCode: null,
+    phoneOtpExpiresAt: null,
+  };
+  if (user.pendingPhone) {
+    updates.phone = user.pendingPhone;
+    updates.pendingPhone = null;
+  }
+
+  return this.userRepository.updateUser(user.id, updates, entityManager);
 }
 
 async forgotPassword(email: string, entityManager?: EntityManager): Promise<void> {

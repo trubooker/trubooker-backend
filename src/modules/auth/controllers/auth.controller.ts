@@ -128,17 +128,27 @@ export class AuthController {
     );
   }
 
-  @Public()
-  @Post('resend-phone-otp')
-  @ApiOperation({ summary: 'Resend phone OTP' })
-  resendPhoneOtp(@Body() dto: ResendPhoneOtpDto) {
-    return this.broker.runUsecases(
-      [
-       this.resendPhoneOtpUsecase
-      ],
-      dto,
-    );
-  }
+  // @Public()
+  // @Post('resend-phone-otp')
+  // @ApiOperation({ summary: 'Resend phone OTP' })
+  // resendPhoneOtp(@Body() dto: ResendPhoneOtpDto) {
+  //   return this.broker.runUsecases(
+  //     [
+  //      this.resendPhoneOtpUsecase
+  //     ],
+  //     dto,
+  //   );
+  // }
+
+  @UseGuards(JwtAuthGuard)
+@Post('resend-phone-otp')
+@ApiOperation({ summary: 'Resend phone OTP — or, if a different phone is supplied, change to it and send OTP there' })
+resendPhoneOtp(@AuthUser() user: any, @Body() dto: ResendPhoneOtpDto) {
+  return this.broker.runUsecases(
+    [this.resendPhoneOtpUsecase],
+    { userId: user.sub, dto },
+  );
+}
 
   @Public()
   @Post('forgot-password')
