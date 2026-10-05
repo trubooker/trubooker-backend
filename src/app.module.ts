@@ -42,6 +42,7 @@ import { GeocodingModule } from '@modules/geocoding/geocoding.module';
 import { TripRequestModule } from '@modules/trip-request/trip-request.module';
 import { TripMatchingModule } from '@modules/trip-matching/trip-matching.module';
 import { GeoModule } from '@modules/geo/geo.module';
+import { NoShowModule } from '@modules/no-show/no-show.module';
 
 
 
@@ -85,6 +86,7 @@ import { GeoModule } from '@modules/geo/geo.module';
     WebhookModule,
     ContactSupportModule,
     TripsModule,
+    NoShowModule,
     TripRequestModule,
     TripMatchingModule,
     KycModule,

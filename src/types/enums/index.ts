@@ -112,6 +112,9 @@ export enum NotificationType {
 
   TRIP_REQUEST_BOARD = 'trip_request_board',       // pooled request pushed to drivers
   TRIP_REQUEST_CLAIMED = 'trip_request_claimed',   // a driver claimed a pooled request
+  NO_SHOW_REPORTED = 'no_show_reported',
+  NO_SHOW_APPROVED = 'no_show_approved',
+  NO_SHOW_DECLINED = 'no_show_declined',
 }
 
 export enum TripRequestStatus {
@@ -232,6 +235,12 @@ export interface CreateContactSupportDto {
   firstName: string;   // for guest users
   lastName: string;    // for guest users
   email: string;       // for guest users
+}
+
+export enum NoShowStatus {
+  PENDING = 'pending',
+  APPROVED = 'approved',
+  DECLINED = 'declined',
 }
 
 export interface ContactSupportQueryDto {
