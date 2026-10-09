@@ -147,6 +147,18 @@ export enum CouponStatus {
   EXPIRED = 'expired',
 }
 export enum Niyu {
+  ACTVE='active',
+  INACTIVE='inactive',
+  IDLE='idle',
+  SUSPENDED='suspended',
+
+}
+
+export enum John {
+  ACTVE='active',
+  INACTIVE='inactive',
+  IDLE='idle',
+  SUSPENDED='suspended',
   
 }
 
