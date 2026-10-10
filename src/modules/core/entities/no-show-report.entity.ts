@@ -41,8 +41,8 @@ export class NoShowReport extends BaseEntity {
   @Column({ type: 'float', nullable: true }) distanceFromPickupMeters: number | null;
 
   // ── Time window ──
-  // @Column({ type: 'timestamp with time zone' }) windowOpensAt: Date;
-  // @Column({ type: 'timestamp with time zone' }) windowClosesAt: Date;
+  @Column({ type: 'timestamp with time zone' }) windowOpensAt: Date;
+  @Column({ type: 'timestamp with time zone' }) windowClosesAt: Date;
   @Column({ type: 'timestamp with time zone' }) reportedAt: Date; // server time
 
   @Column({ type: 'varchar', nullable: true }) driverNote: string | null;

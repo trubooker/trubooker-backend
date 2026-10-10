@@ -14,9 +14,9 @@ import {
 import { ReportNoShowDto } from '../dtos/no-show.dto';
 
 // /** Driver may only report this many minutes AFTER scheduled departure… */
-// const MIN_WAIT_MINUTES = Number(process.env.NO_SHOW_MIN_WAIT_MINUTES ?? 15);
-// /** …and the window closes this many hours after scheduled departure. */
-// const WINDOW_HOURS = Number(process.env.NO_SHOW_WINDOW_HOURS ?? 3);
+const MIN_WAIT_MINUTES = Number(process.env.NO_SHOW_MIN_WAIT_MINUTES ?? 15);
+/** …and the window closes this many hours after scheduled departure. */
+const WINDOW_HOURS = Number(process.env.NO_SHOW_WINDOW_HOURS ?? 3);
 
 @Injectable()
 export class NoShowService {
@@ -46,8 +46,11 @@ export class NoShowService {
       throw new ForbiddenException('This booking is not on your trip');
 
     // Eligibility
-    if (![TripStatus.ACTIVE, TripStatus.STARTED, TripStatus.COMPLETED].includes(booking.trip.status))
-      throw new BadRequestException('This trip is not eligible for a no-show report');
+    // if (![TripStatus.ACTIVE, TripStatus.STARTED, TripStatus.COMPLETED].includes(booking.trip.status))
+    //   throw new BadRequestException('This trip is not eligible for a no-show report');
+    if (booking.trip.status === TripStatus.CANCELLED)
+        throw new BadRequestException('This trip was cancelled, so a no-show cannot be reported');
+
     if (![BookingStatus.CONFIRMED, BookingStatus.COMPLETED].includes(booking.status) ||
         booking.paymentStatus !== PaymentStatus.SUCCESS)
       throw new BadRequestException('Only paid, confirmed bookings can be reported');
@@ -58,14 +61,14 @@ export class NoShowService {
     if (existing) throw new BadRequestException('A no-show report already exists for this booking');
 
     // Time window
-    // const { opensAt, closesAt } = this.computeWindow(booking.trip);
-    // const now = new Date();
-    // if (now < opensAt)
-    //   throw new BadRequestException(
-    //     `You can report a no-show from ${opensAt.toISOString()} (${MIN_WAIT_MINUTES} min after departure)`,
-    //   );
-    // if (now > closesAt)
-    //   throw new BadRequestException('The window to report this no-show has closed');
+    const { opensAt, closesAt } = this.computeWindow(booking.trip);
+    const now = new Date();
+    if (now < opensAt)
+      throw new BadRequestException(
+        `You can report a no-show from ${opensAt.toISOString()} (${MIN_WAIT_MINUTES} min after departure)`,
+      );
+    if (now > closesAt)
+      throw new BadRequestException('The window to report this no-show has closed');
 
     // Escrow must still be held
     const escrow = await this.escrowRepo.findOne({ where: { bookingId } });
@@ -95,9 +98,9 @@ export class NoShowService {
           reportedLng: dto.longitude,
           accuracyMeters: dto.accuracy ?? null,
           distanceFromPickupMeters: distance,
-          // windowOpensAt: opensAt,
-          // windowClosesAt: closesAt,
-          reportedAt: new Date(),
+          windowOpensAt: opensAt,
+          windowClosesAt: closesAt,
+          reportedAt: now,
           driverNote: dto.note ?? null,
           createdBy: driverUserId,
         }),
@@ -235,20 +238,30 @@ export class NoShowService {
     return Math.round(2 * R * Math.asin(Math.sqrt(a)));
   }
 
-  // private withMapLink(r: NoShowReport) {
-  //   return {
-  //     ...r,
-  //     mapUrl: `https://www.google.com/maps?q=${r.reportedLat},${r.reportedLng}`,
-  //     withinWindow: r.reportedAt >= r.windowOpensAt && r.reportedAt <= r.windowClosesAt,
-  //   };
-  // }
-
   private withMapLink(r: NoShowReport) {
-  return {
-    ...r,
-    mapUrl: `https://www.google.com/maps?q=${r.reportedLat},${r.reportedLng}`,
-  };
-}
+    return {
+      ...r,
+      mapUrl: `https://www.google.com/maps?q=${r.reportedLat},${r.reportedLng}`,
+      withinWindow: r.reportedAt >= r.windowOpensAt && r.reportedAt <= r.windowClosesAt,
+    };
+  }
+
+//   private withMapLink(r: NoShowReport) {
+//   return {
+//     ...r,
+//     mapUrl: `https://www.google.com/maps?q=${r.reportedLat},${r.reportedLng}`,
+//   };
+// }
+
+  private computeWindow(trip: Trip) {
+    // Lagos is UTC+1 with no DST. Adjust if trips can be created in other zones.
+    const t = trip.departureTime.length === 5 ? `${trip.departureTime}:00` : trip.departureTime;
+    const departure = new Date(`${trip.departureDate}T${t}+01:00`);
+    return {
+      opensAt: new Date(departure.getTime() + MIN_WAIT_MINUTES * 60_000),
+      closesAt: new Date(departure.getTime() + WINDOW_HOURS * 3_600_000),
+    };
+  }
 
   private async notifyDriver(r: NoShowReport, type: NotificationType, title: string, body: string) {
     try {
