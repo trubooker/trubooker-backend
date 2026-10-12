@@ -48,6 +48,7 @@ export class NoShowService {
     // Eligibility
     // if (![TripStatus.ACTIVE, TripStatus.STARTED, TripStatus.COMPLETED].includes(booking.trip.status))
     //   throw new BadRequestException('This trip is not eligible for a no-show report');
+    //this code block runs check on the trip
     if (booking.trip.status === TripStatus.CANCELLED)
         throw new BadRequestException('This trip was cancelled, so a no-show cannot be reported');
 

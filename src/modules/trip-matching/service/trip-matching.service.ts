@@ -186,98 +186,7 @@ export class TripMatchingService {
   }
 
   /** Create or extend the MATCHING pool for a route+date and attach members. */
-  // private async upsertPool(
-  //   matchKey: string,
-  //   members: TripRequest[],
-  //   em: EntityManager,
-  // ): Promise<TripRequestPool | null> {
-  //   const [sample] = members;
-  //   const requestedDate = sample.requestedDate;
-
-  //   // Earliest preferred time wins (default 06:00 when nobody stated one).
-  //   // The concrete clock time comes from each member's chosen slot; the raw
-  //   // `preferredTime` field now holds a display range, not a parseable time.
-  //   const earliestTime = members
-  //     .map((m) => this.slotDepartureTime(m))
-  //     .filter(Boolean)
-  //     .sort()[0] ?? DEFAULT_DEPARTURE_TIME;
-
-  //   const departureAt = new Date(`${requestedDate}T${earliestTime}`);
-  //   if (Number.isNaN(departureAt.getTime())) return null;
-  //   if (departureAt.getTime() <= Date.now()) return null; // already in the past
-
-  //   const isInter = isInterStateTrip(sample.origin, sample.destination);
-  //   const windowHours = await this.dispatchWindowHours(isInter);
-  //   const now = new Date();
-
-  //   // Runs inside the caller's transaction (cron sweep or on-create match).
-  //   // Reuse an existing OPEN pool for this route+date — one that's still
-  //   // MATCHING or already on the BOARD — so late arrivals join the same group.
-  //   // CLAIMED/EXPIRED/FULFILLED pools are excluded, so a new request there
-  //   // starts a fresh pool.
-  //   let pool = await em.findOne(TripRequestPool, {
-  //     where: {
-  //       matchKey,
-  //       status: In([TripPoolStatus.MATCHING, TripPoolStatus.BOARD]),
-  //     },
-  //   });
-
-  //   const isNew = !pool;
-
-   
-
-  //   if (!pool) {
-  //     // Keep origin/destination EXACTLY as the passenger requested them —
-  //     // don't collapse to the resolved district (e.g. "Wuse 2, Abuja Federal
-  //     // Capital Territory" must stay as typed, not become just "Abuja").
-  //     // originState/destinationState below still carry the resolved state for
-  //     // internal filtering/grouping; the district resolver remains available
-  //     // via resolveNigeriaDistrict()/districtToken() for anything that needs
-  //     // a normalised grouping label without touching the display text.
-  //     pool = em.create(TripRequestPool, {
-  //       matchKey,
-  //       origin: sample.origin,
-  //       destination: sample.destination,
-  //       originState: resolveNigeriaState(sample.origin),
-  //       destinationState: resolveNigeriaState(sample.destination),
-  //       isInterState: isInter,
-  //       requestedDate,
-  //       departureTime: earliestTime,
-  //       departureAt,
-  //       dispatchWindowHours: windowHours,
-  //       dispatchAt: now,
-  //       dispatchedAt: now,
-  //       status: TripPoolStatus.BOARD,
-  //       totalSeats: 0,
-  //       memberCount: 0,
-  //     });
-  //     pool = await em.save(TripRequestPool, pool);
-  //   }else{
-  //         //   // Keep the earliest preferred time if a new member wants to leave sooner.
-  //     if (earliestTime < (pool.departureTime ?? DEFAULT_DEPARTURE_TIME)) {
-  //       pool.departureTime = earliestTime;
-  //       pool.departureAt = departureAt;
-  //     }
-  //   }
-
-  //   // Attach members and recompute totals from the DB (authoritative).
-  //   const ids = members.map((m) => m.id);
-  //   await em.update(TripRequest, { id: In(ids) }, { poolId: pool.id });
-
-  //   const all = await em.find(TripRequest, { where: { poolId: pool.id } });
-  //   pool.memberCount = all.length;
-  //   pool.totalSeats = all.reduce((sum, r) => sum + (r.seats ?? 1), 0);
-  //   const saved = await em.save(TripRequestPool, pool);
-
-  //   // Tell active drivers the instant a brand-new pool lands on the board.
-  //   // Best-effort (notifyDriversOfBoard swallows its own errors), and only for
-  //   // a newly created pool so late joiners don't re-spam drivers.
-  //   if (isNew) {
-  //     await this.notifyDriversOfBoard(saved);
-  //   }
-
-  //   return saved;
-  // }
+ 
 
   // ════════════════════════════════════════════════════════════════════════
   // 2. DISPATCH — push due pools to the driver board (12h/18h before departure)
@@ -314,7 +223,8 @@ export class TripMatchingService {
     const HOUR_MS = 60 * 60 * 1000;
     const scheduledDispatchAt = new Date(departureAt.getTime() - windowHours * HOUR_MS);
     const dispatchNow = scheduledDispatchAt.getTime() <= now.getTime();
-    let goneToBoardNow = false; // true when this call puts the pool on the board
+    let goneToBoardNow = false;  // this call puts the pool on the board
+    let joinedBoardPool = false; // a new request joined a pool already on the board
 
     // Runs inside the caller's transaction (cron sweep or on-create match).
     // Reuse an existing OPEN pool for this route+date — one that's still
@@ -354,6 +264,10 @@ export class TripMatchingService {
       pool = await em.save(TripRequestPool, pool);
       goneToBoardNow = dispatchNow;
     } else {
+      // A new request landing on a pool that's already claimable: drivers
+      // should hear about the extra demand.
+      joinedBoardPool = pool.status === TripPoolStatus.BOARD;
+
       // Keep the earliest preferred time if a new member wants to leave sooner.
       if (earliestTime < (pool.departureTime ?? DEFAULT_DEPARTURE_TIME)) {
         pool.departureTime = earliestTime;
@@ -386,15 +300,134 @@ export class TripMatchingService {
     pool.totalSeats = all.reduce((sum, r) => sum + (r.seats ?? 1), 0);
     const saved = await em.save(TripRequestPool, pool);
 
-    // Notify drivers only when the pool actually lands on the board now.
-    // A pool that is still waiting (MATCHING) is announced later by
-    // dispatchDuePools() when its window opens.
-    if (goneToBoardNow) {
-      await this.notifyDriversOfBoard(saved);
+    // Notify drivers whenever a request makes a pool claimable right now:
+    // either the pool just landed on the board, or a new request joined one
+    // that's already there. A pool still waiting (MATCHING) is announced later
+    // by dispatchDuePools() when its window opens — drivers can't claim it
+    // before then, so notifying earlier would point them at nothing.
+    // Fire-and-forget: fanning out to every driver must not slow down (or
+    // fail) the passenger's request. notifyDriversOfBoard swallows its errors.
+    if (goneToBoardNow || joinedBoardPool) {
+      void this.notifyDriversOfBoard(saved, {
+        isNewDemand: joinedBoardPool && !goneToBoardNow,
+      });
     }
 
     return saved;
   }
+    /** Create or extend the MATCHING pool for a route+date and attach members. */
+  // private async upsertPool(
+  //   matchKey: string,
+  //   members: TripRequest[],
+  //   em: EntityManager,
+  // ): Promise<TripRequestPool | null> {
+  //   const [sample] = members;
+  //   const requestedDate = sample.requestedDate;
+
+  //   // Earliest preferred time wins (default 06:00 when nobody stated one).
+  //   // The concrete clock time comes from each member's chosen slot; the raw
+  //   // `preferredTime` field now holds a display range, not a parseable time.
+  //   const earliestTime = members
+  //     .map((m) => this.slotDepartureTime(m))
+  //     .filter(Boolean)
+  //     .sort()[0] ?? DEFAULT_DEPARTURE_TIME;
+
+  //   const departureAt = new Date(`${requestedDate}T${earliestTime}`);
+  //   if (Number.isNaN(departureAt.getTime())) return null;
+  //   if (departureAt.getTime() <= Date.now()) return null; // already in the past
+
+  //   const isInter = isInterStateTrip(sample.origin, sample.destination);
+  //   const windowHours = await this.dispatchWindowHours(isInter);
+  //   const now = new Date();
+
+  //   // A pool reaches the driver board `windowHours` before departure
+  //   // (12h intra-state / 18h inter-state by default). A request made INSIDE
+  //   // that window has nothing to wait for, so it goes on the board instantly.
+  //   const HOUR_MS = 60 * 60 * 1000;
+  //   const scheduledDispatchAt = new Date(departureAt.getTime() - windowHours * HOUR_MS);
+  //   const dispatchNow = scheduledDispatchAt.getTime() <= now.getTime();
+  //   let goneToBoardNow = false; // true when this call puts the pool on the board
+    
+
+  //   // Runs inside the caller's transaction (cron sweep or on-create match).
+  //   // Reuse an existing OPEN pool for this route+date — one that's still
+  //   // MATCHING or already on the BOARD — so late arrivals join the same group.
+  //   // CLAIMED/EXPIRED/FULFILLED pools are excluded, so a new request there
+  //   // starts a fresh pool.
+  //   let pool = await em.findOne(TripRequestPool, {
+  //     where: {
+  //       matchKey,
+  //       status: In([TripPoolStatus.MATCHING, TripPoolStatus.BOARD]),
+  //     },
+  //   });
+
+  //   if (!pool) {
+  //     // Keep origin/destination EXACTLY as the passenger requested them —
+  //     // don't collapse to the resolved district. originState/destinationState
+  //     // carry the resolved state for internal filtering/grouping.
+  //     pool = em.create(TripRequestPool, {
+  //       matchKey,
+  //       origin: sample.origin,
+  //       destination: sample.destination,
+  //       originState: resolveNigeriaState(sample.origin),
+  //       destinationState: resolveNigeriaState(sample.destination),
+  //       isInterState: isInter,
+  //       requestedDate,
+  //       departureTime: earliestTime,
+  //       departureAt,
+  //       dispatchWindowHours: windowHours,
+  //       // Outside the window: wait as MATCHING until dispatchAt (the cron
+  //       // dispatchDuePools() moves it to BOARD). Inside the window: board now.
+  //       dispatchAt: dispatchNow ? now : scheduledDispatchAt,
+  //       dispatchedAt: dispatchNow ? now : null,
+  //       status: dispatchNow ? TripPoolStatus.BOARD : TripPoolStatus.MATCHING,
+  //       totalSeats: 0,
+  //       memberCount: 0,
+  //     });
+  //     pool = await em.save(TripRequestPool, pool);
+  //     goneToBoardNow = dispatchNow;
+  //   } else {
+  //     // Keep the earliest preferred time if a new member wants to leave sooner.
+  //     if (earliestTime < (pool.departureTime ?? DEFAULT_DEPARTURE_TIME)) {
+  //       pool.departureTime = earliestTime;
+  //       pool.departureAt = departureAt;
+
+  //       // Earlier departure => earlier dispatch. Re-time a pool that is still
+  //       // waiting, and promote it if its (new) window has already opened.
+  //       if (pool.status === TripPoolStatus.MATCHING) {
+  //         const newDispatchAt = new Date(
+  //           departureAt.getTime() - (pool.dispatchWindowHours ?? windowHours) * HOUR_MS,
+  //         );
+  //         if (newDispatchAt.getTime() <= now.getTime()) {
+  //           pool.status = TripPoolStatus.BOARD;
+  //           pool.dispatchAt = now;
+  //           pool.dispatchedAt = now;
+  //           goneToBoardNow = true;
+  //         } else {
+  //           pool.dispatchAt = newDispatchAt;
+  //         }
+  //       }
+  //     }
+  //   }
+
+  //   // Attach members and recompute totals from the DB (authoritative).
+  //   const ids = members.map((m) => m.id);
+  //   await em.update(TripRequest, { id: In(ids) }, { poolId: pool.id });
+
+  //   const all = await em.find(TripRequest, { where: { poolId: pool.id } });
+  //   pool.memberCount = all.length;
+  //   pool.totalSeats = all.reduce((sum, r) => sum + (r.seats ?? 1), 0);
+  //   const saved = await em.save(TripRequestPool, pool);
+
+  //   // Notify drivers only when the pool actually lands on the board now.
+  //   // A pool that is still waiting (MATCHING) is announced later by
+  //   // dispatchDuePools() when its window opens.
+  //   if (goneToBoardNow) {
+  //     await this.notifyDriversOfBoard(saved);
+  //   }
+
+  //   return saved;
+  // }
   
   async dispatchDuePools(): Promise<{ dispatched: number }> {
     const now = new Date();
@@ -451,10 +484,20 @@ export class TripMatchingService {
    *
    * To re-enable, delete the early `return` and uncomment the body below.
    */
-  private async notifyDriversOfBoard(_pool: TripRequestPool): Promise<void> {
-    return;
 
-    /* --- driver notifications disabled ---
+
+    /**
+   * Notify verified drivers that a pooled request is on the board.
+   *
+   * NotificationService.notify() already does all three channels per driver —
+   * persists the in-app notification, emits over the websocket, and sends the
+   * Expo push to the driver's expoToken — so there is deliberately no separate
+   * pushToUser() call here (that would deliver every push twice).
+   */
+  private async notifyDriversOfBoard(
+    pool: TripRequestPool,
+    opts: { isNewDemand?: boolean } = {},
+  ): Promise<void> {
     try {
       const drivers = await this.driverRepo.find({
         where: { licenseVerified: true },
@@ -464,30 +507,26 @@ export class TripMatchingService {
       if (!userIds.length) return;
 
       await this.notificationService.notifyMany(userIds, {
-        title: 'New trip request on the board',
+        title: opts.isNewDemand
+          ? 'More passengers on a trip request'
+          : 'New trip request on the board',
         body:
-          `${_pool.totalSeats} passenger(s) want ${_pool.origin} → ${_pool.destination} ` +
-          `on ${_pool.requestedDate}. Tap to claim.`,
+          `${pool.totalSeats} passenger(s) want ${pool.origin} → ${pool.destination} ` +
+          `on ${pool.requestedDate}. Tap to claim.`,
         type: NotificationType.TRIP_REQUEST_BOARD,
         data: {
-          poolId: _pool.id,
-          origin: _pool.origin,
-          destination: _pool.destination,
-          requestedDate: _pool.requestedDate,
-          departureTime: _pool.departureTime,
-          totalSeats: _pool.totalSeats,
-          isInterState: _pool.isInterState,
+          poolId: pool.id,
+          origin: pool.origin,
+          destination: pool.destination,
+          requestedDate: pool.requestedDate,
+          departureTime: pool.departureTime,
+          totalSeats: pool.totalSeats,
+          isInterState: pool.isInterState,
         },
       });
-         // Direct Expo push, per driver
-    for (const userId of userIds) {
-      await this.pushToUser(userId, 'New trip request on the board', `${_pool.totalSeats} passenger(s) want ${_pool.origin} → ${_pool.destination} ` +
-          `on ${_pool.requestedDate}. Tap to claim.`);
-    }
     } catch (err) {
-      this.logger.warn(`Failed to notify drivers for pool ${_pool.id}: ${err?.message}`);
+      this.logger.warn(`Failed to notify drivers for pool ${pool.id}: ${err?.message}`);
     }
-    */
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -677,127 +716,7 @@ private async pushToUser(userId: string, title: string, body: string, data?: any
  */
 
 
-// async fulfillRequestsForTrip(
-//   args: {
-//     tripId: string;
-//     origin: string;
-//     destination: string;
-//     date: string;
-//     departureTime?: string | null;
-//   },
-//   em: EntityManager,
-// ): Promise<number> {
-//   const { tripId, origin, destination, date, departureTime } = args;
-//   if (!origin || !destination || !date) return 0;
 
-//   // Both sides must be ISO before comparison. Requests are normalised on
-//   // create; trips are not, so coerce here.
-//   const iso = (d: string) => {
-//     const t = String(d ?? '').trim();
-//     if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
-//     const m = t.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
-//     return m ? `${m[3]}-${m[2]}-${m[1]}` : t;
-//   };
-
-//   const tripDate = iso(date);
-//   // Match on district + date. The driver's exact "Market Road (Ekpoma)" and the
-//   // passenger's "GT Bank Ekpoma" both resolve to the Ekpoma district token.
-//   const routeKey = this.routeDateKey(origin, destination, tripDate);
-//   // The slot the trip's departure time falls in (null when it can't be parsed).
-//   const tripSlot = this.slotForClock(departureTime);
-//   this.logger.debug(
-//     `fulfillRequestsForTrip: trip ${tripId} routeKey=${routeKey} slot=${tripSlot ?? 'any'}`,
-//   );
-
-//   // All requests still waiting. We compare keys in memory so date-format
-//   // differences never hide a match at the SQL layer.
-//   const pending = await em.find(TripRequest, {
-//     where: { status: TripRequestStatus.PENDING },
-//   });
-
-//   const matches = pending.filter((r) => {
-//     if (this.routeDateKey(r.origin, r.destination, iso(r.requestedDate)) !== routeKey) {
-//       return false;
-//     }
-//     // Same district + date. Now honour the time-of-day: only pull in passengers
-//     // whose slot matches the trip's. If the trip time is unknown, or a passenger
-//     // stated no slot, treat it as compatible rather than dropping the match.
-//     if (!tripSlot) return true;
-//     const reqSlot = this.requestSlot(r);
-//     return reqSlot === 'any' || reqSlot === tripSlot;
-//   });
-
-//   if (!matches.length) {
-//     this.logger.debug(
-//       `fulfillRequestsForTrip: no PENDING request matched routeKey=${routeKey} ` +
-//         `slot=${tripSlot ?? 'any'} (scanned ${pending.length})`,
-//     );
-//     return 0;
-//   }
-
-//   for (const req of matches) {
-//     req.status = TripRequestStatus.APPROVED;
-//     req.linkedTripId = tripId;
-//     req.processedAt = new Date();
-//     await em.save(TripRequest, req);
-
-//     // Close the pool this request was sitting in, if any.
-//     if (req.poolId) {
-//       await em.update(
-//         TripRequestPool,
-//         { id: req.poolId },
-//         {
-//           status: TripPoolStatus.CLAIMED,
-//           linkedTripId: tripId,
-//           claimedAt: new Date(),
-//         },
-//       );
-//     }
-
-//      const title = 'Your trip request was approved';
-//      const body =
-//       `A driver created a trip for ${req.origin} → ${req.destination} ` +
-//       `on ${req.requestedDate}. Tap to book your seat.`;
-
-//     // Notify the passenger (per-passenger best-effort — one failure must
-//     // not stop the others).
-//     try {
-//       await this.notificationService.notify({
-//         userId: req.requesterUserId,
-//         title: 'Your trip request was approved',
-//         body:
-//           `A driver created a trip for ${req.origin} → ${req.destination} ` +
-//           `on ${req.requestedDate}. Tap to book your seat.`,
-//         type: NotificationType.TRIP_REQUEST_APPROVED,
-//         data: {
-//           tripRequestId: req.id,
-//           tripId,
-//           origin: req.origin,
-//           destination: req.destination,
-//           requestedDate: req.requestedDate,
-//         },
-//       });
-//     } catch (err) {
-//       this.logger.warn(
-//         `Failed to notify passenger ${req.requesterUserId}: ${err?.message}`,
-//       );
-//     }
-//     await this.pushToUser(req.requesterUserId, title, body, {
-//         tripRequestId: req.id,
-//         tripId,
-//         origin: req.origin,
-//         destination: req.destination,
-//         requestedDate: req.requestedDate,
-//       });
-    
-  
-//   }
-
-//   this.logger.log(
-//     `Trip ${tripId} auto-approved ${matches.length} request(s).`,
-//   );
-//   return matches.length;
-// }
 
   /**
  * Called when a driver creates a trip. Finds the PENDING passenger requests
@@ -969,24 +888,7 @@ async fulfillRequestsForTrip(
  * An intra-state request (Benin City → Ekpoma) never gets 'state': a trip to
  * Uromi is not a trip to Ekpoma.
  */
-// private tripServesRequest(
-//   tripOrigin: string,
-//   tripArrival: string,
-//   req: TripRequest,
-// ): 'exact' | 'state' | null {
-//   // 1. Departure must be the same town / district.
-//   if (!locationInDistrict(tripOrigin, req.origin)) return null;
 
-//   // 2a. Same arrival district.
-//   if (locationInDistrict(tripArrival, req.destination)) return 'exact';
-
-//   // 2b. Inter-state request: any arrival inside the requested state.
-//   if (!isDefinitelyInterState(req.origin, req.destination)) return null;
-//   const wantedState = resolveNigeriaState(req.destination);
-//   if (wantedState && locationInState(tripArrival, wantedState)) return 'state';
-
-//   return null;
-// }
 
 
 private tripServesRequest(
@@ -1061,7 +963,6 @@ private tripServesRequest(
   }
 
 
-  // newwwwwwwwwwww
    /**
    * Route + date key: `originDistrict|destinationDistrict|YYYY-MM-DD`.
    * Every address in the same town collapses to one district token, so a

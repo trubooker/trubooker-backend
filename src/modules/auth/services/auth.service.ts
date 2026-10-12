@@ -153,7 +153,7 @@ export class AuthService {
    this.notificationService.notify({
     userId: user.id,
     title: 'Welcome to Tru Booker',
-    body: `Your ${user.role} account was created successfully. Please verify your email to get started.`,
+    body: `Your ${user.role} account was created successfully. Please verify your email  to get started.`,
     type: NotificationType.BROADCAST,
     data: { userId: user.id, role: user.role },
   });
