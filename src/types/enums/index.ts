@@ -115,6 +115,7 @@ export enum NotificationType {
   NO_SHOW_REPORTED = 'no_show_reported',
   NO_SHOW_APPROVED = 'no_show_approved',
   NO_SHOW_DECLINED = 'no_show_declined',
+   PASSENGER_SIGNUP = 'passenger_signup', 
 }
 
 export enum TripRequestStatus {

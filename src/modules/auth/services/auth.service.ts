@@ -158,6 +158,21 @@ export class AuthService {
     data: { userId: user.id, role: user.role },
   });
 
+   if (user.role === UserRole.PASSENGER) {
+      this.notificationService
+        .notifyAdmins({
+          title: 'New passenger signup',
+          body: `A passenger with the email ${user.email} just signed up.`,
+          type: NotificationType.PASSENGER_SIGNUP,
+          data: {
+            userId: user.id,
+            email: user.email,
+            role: user.role,
+          },
+        })
+        .catch(() => undefined);
+    }
+
     // TODO: Send OTP via notification service
     return user;
   }
