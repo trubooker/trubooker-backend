@@ -156,6 +156,10 @@ async getPassengers(query: {
     return await this.adminRepo.getDriverWithDetails(id, query)
   }
 
+    async deleteUser(id: string, adminId: string, reason?: string) {
+    return await this.adminRepo.deleteUser(id, adminId, reason);
+  }
+
   async getPassengerWithDetails(id: string, query: { page?: number; limit?: number }){
     return await this.adminRepo.getPassengerWithDetails(id, query)
   }

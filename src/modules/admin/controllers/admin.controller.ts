@@ -128,6 +128,8 @@ import { ApproveVehicleUsecase, ListPendingVehiclesUsecase, RejectVehicleUsecase
 import { GetTotalApproveDriverUsecase } from '../usecases/gettotalapprove.usecase';
 import { NoVehicleUploadedUsecase } from '../usecases/noVehicleUploaded.usecase';
 import { AdminUpdateVehicleDto } from '../dtos/update-vehicle.dto';
+import { DeleteUserUsecase } from '../usecases/deleteuser.usecase';
+import { DeleteUserDto } from '@modules/auth/dtos/deleteuser.dto';
 
 
 
@@ -210,7 +212,8 @@ private readonly getTotalApproveDriverUsecase:GetTotalApproveDriverUsecase,
     private readonly listPendingVehiclesUsecase: ListPendingVehiclesUsecase,
     private readonly approveVehicleUsecase: ApproveVehicleUsecase,
     private readonly rejectVehicleUsecase: RejectVehicleUsecase,
-    private readonly   noVehicleUploadedUsecase: NoVehicleUploadedUsecase
+    private readonly   noVehicleUploadedUsecase: NoVehicleUploadedUsecase,
+    private readonly deleteUserUsecase: DeleteUserUsecase,
   ) {}
 
 
@@ -703,6 +706,25 @@ updateDriverDoc(@Param('id') id: string, @Body() dto: UpdateDriverDocumentDto) {
   @ApiParam({ name: 'id', type: String, description: 'Activate a user account' })
   activateUser(@Param('id') id: string) {
     return this.broker.runUsecases([this.activateUserUsecase], { id });
+  }
+
+  @ApiBearerAuth()
+  @AdminOnly()
+  @RequirePermissions(Permission.USER_DELETE)
+  @Delete('users/:id')
+  @ApiOperation({ summary: 'Delete (soft-delete) a user account' })
+  @ApiParam({ name: 'id', type: String, description: 'User UUID' })
+  @ApiBody({ type: DeleteUserDto })
+  deleteUser(
+    @Param('id') id: string,
+    @Body() dto: DeleteUserDto,
+    @AuthUser() admin: any,
+  ) {
+    return this.broker.runUsecases([this.deleteUserUsecase], {
+      id,
+      adminId: admin.sub,
+      reason: dto?.deleteReason,
+    });
   }
 
   // ─── KYC / Documents ─────────────────────────────────────────────────────────

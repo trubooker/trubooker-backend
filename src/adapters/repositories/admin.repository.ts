@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, ILike, In, Repository } from 'typeorm';
 import { Admin } from '@modules/core/entities/admin.entity';
@@ -1402,6 +1402,50 @@ async listTrips(query: { page?: number; limit?: number; status?: string }): Prom
     return trip;
   }
 
+     async deleteUser(id: string, adminId: string, reason?: string) {
+    const user = await this.getUser(id);
+
+    if (user.id === adminId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+    if (user.role === UserRole.ADMIN) {
+      throw new ForbiddenException('Admin accounts cannot be deleted here');
+    }
+
+    // Same safeguards as driver self-delete
+    if (user.role === UserRole.DRIVER) {
+      const driver = await this.driverRepo.findOne({ where: { userId: id } });
+      if (driver) {
+        const openTrip = await this.tripRepo.findOne({
+          where: [
+            { driverId: driver.id, status: TripStatus.PENDING },
+            { driverId: driver.id, status: TripStatus.ACTIVE },
+            { driverId: driver.id, status: TripStatus.STARTED },
+          ],
+        });
+        if (openTrip) {
+          throw new BadRequestException(
+            'Driver has an upcoming or in-progress trip. Resolve it before deleting.',
+          );
+        }
+        if (Number(driver.currentBalance) > 0) {
+          throw new BadRequestException(
+            'Driver has an outstanding wallet balance. Pay it out before deleting.',
+          );
+        }
+      }
+    }
+
+    // save() instead of update(): the jsonb `metadata` column fails
+    // TypeORM's strict _QueryDeepPartialEntity typing on update()
+    user.deleteReason = reason ?? 'Deleted by admin';
+    user.metadata = { ...(user.metadata ?? {}), deletedByAdminId: adminId };
+    await this.userRepo.save(user);
+
+    await this.userRepo.softDelete(id); // sets deletedAt, keeps the row
+
+    return this.userRepo.findOne({ where: { id }, withDeleted: true });
+  }
   // ─── Payout Management ───────────────────────────────────────────────────────
 
   async listPayouts(query: {

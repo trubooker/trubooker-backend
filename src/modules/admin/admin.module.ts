@@ -127,6 +127,7 @@ import {
 import { GetTotalApproveDriverUsecase } from './usecases/gettotalapprove.usecase';
 import { NoVehicleUploadedUsecase } from './usecases/noVehicleUploaded.usecase';
 import { AcGrantsModule } from '@shared/access-control/ac-grants.module';
+import { DeleteUserUsecase } from './usecases/deleteuser.usecase';
 
 const USECASES = [
   
@@ -167,6 +168,7 @@ const USECASES = [
   ListTripsUsecase,
   GetTripUsecase,
   UpdatePasswordUsecase,
+  DeleteUserUsecase,
   GetDriversUsecase,
   GetDriverByIdUsecase,
   ActivateDriverUsecase,

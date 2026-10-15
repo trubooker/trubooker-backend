@@ -23,6 +23,7 @@ export enum Permission {
   USER_VIEW = 'user:view',
   USER_SUSPEND = 'user:suspend',
   USER_ACTIVATE = 'user:activate',
+  USER_DELETE = 'user:delete',
 
   // Coupons
   COUPON_VIEW = 'coupon:view',
@@ -31,4 +32,5 @@ export enum Permission {
 
   // Kill switch
   KILLSWITCH_TOGGLE = 'killswitch:toggle',
+  
 }
