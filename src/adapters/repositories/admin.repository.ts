@@ -1880,7 +1880,8 @@ async getNotificationActivityForAdmin(
     .addSelect('admin.id', 'adminId')
     .addSelect('admin.firstName', 'adminFirstName')
     .addSelect('admin.lastName', 'adminLastName')
-    .orderBy('notification.createdAt', 'DESC');
+    .orderBy('notification.createdAt', 'DESC')
+    .addSelect('admin.role', 'adminRole')
 
   if (role) {
     qb.andWhere('user.role = :role', { role });
@@ -1925,7 +1926,7 @@ async getNotificationActivityForAdmin(
         ? {
             id: row.adminId,
             name: `${row.adminFirstName ?? ''} ${row.adminLastName ?? ''}`.trim(),
-            role: UserRole.ADMIN,
+            role: row.adminRole ?? UserRole.ADMIN,
           }
         : null,
   }));

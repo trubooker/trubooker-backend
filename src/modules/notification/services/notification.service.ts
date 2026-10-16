@@ -1,7 +1,7 @@
 // src/modules/notification/services/notification.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { NotificationRepository } from '@adapters/repositories/notification.repository';
 import { ExpoService } from './expo.service';
 import { NotificationGateway } from '../gateway/notification.gateway';
@@ -80,11 +80,11 @@ export class NotificationService {
     return notification;
   }
 
- async notifyAdmins(base: Omit<NotifyParams, 'userId'>) {
+ async notifyAdmins(base: Omit<NotifyParams, 'userId'>,roles: string[] = ['admin']) {
     let admins;
     try {
       admins = await this.adminRepo.find({
-        where: { status: UserStatus.ACTIVE },
+        where: { status: UserStatus.ACTIVE,  role: In(roles) },
       });
     } catch (err) {
       this.logger.error('Failed to load admins for notification', err?.message);
